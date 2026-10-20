@@ -1,0 +1,54 @@
+name: build-lib-artifact
+
+# 用上游自己的工具链在 GitHub 上构建 lib/，产出可下载 artifact。
+# 目的：避免在用户机器上手工 tsc（167 个类型错误 + 依赖缺口），
+# 让上游 CI 环境按它自己的 npm ci + 构建链产出权威结果。
+on:
+  workflow_dispatch:
+  push:
+    branches: [build-lib]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.4.0-alpha1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install (lockfile, no scripts)
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
+        continue-on-error: true
+
+      - name: Show typescript presence
+        run: node -e "try{console.log('ts:',require('typescript').version)}catch(e){console.log('NO TS:',e.message)}"
+        continue-on-error: true
+
+      - name: Build lib
+        run: npm run build
+        continue-on-error: true
+
+      - name: Report lib contents
+        run: |
+          node -e "const fs=require('fs');const walk=(d,a=[])=>{for(const f of fs.readdirSync(d,{withFileTypes:true})){const p=d+'/'+f.name;f.isDirectory()?walk(p,a):a.push(p)}return a};const files=fs.existsSync('lib')?walk('lib'):[];console.log('lib files:',files.length);console.log('has index:',fs.existsSync('lib/index.js'));console.log('has shells/jobs:',fs.existsSync('lib/shells/jobs.js'))"
+
+      - name: Upload lib artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-ops-lib
+          path: |
+            lib/
+            package.json
+            cordis.patch.yml
+            locale/
+          if-no-files-found: warn
+          retention-days: 3
